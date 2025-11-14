@@ -6,4 +6,5 @@ pillow
 pyttsx3 
 openai
 elevenlabs
+python-dotenv
 sqlite3-binary
