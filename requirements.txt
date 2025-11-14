@@ -3,4 +3,7 @@ requests
 gtts
 nltk
 pillow
-pyttsx3
+pyttsx3 
+openai
+elevenlabs
+sqlite3-binary

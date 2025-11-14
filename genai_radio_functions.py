@@ -146,5 +146,4 @@ def generate_mcqs(sentences, n=5):
             "options": opts,
             "answer": ans
         })
-
-    return mcqs   
+    return mcqs
