@@ -1,4 +1,5 @@
 streamlit==1.36.0
 openai
-requests
 gtts
+nltk
+pillow
