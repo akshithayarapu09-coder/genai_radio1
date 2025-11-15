@@ -1,10 +1,4 @@
 streamlit==1.36.0
+openai
 requests
 gtts
-nltk
-pillow
-pyttsx3 
-openai==1.51.0
-elevenlabs
-python-dotenv
-sqlite3-binary
