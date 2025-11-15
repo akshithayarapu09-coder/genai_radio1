@@ -125,7 +125,7 @@ if generate_btn:
 
     # Save metadata to DB (optional)
     try:
-        conn = _import_("sqlite3").connect("genai_radio.db")
+        conn = __import__("sqlite3").connect("genai_radio.db")
         c = conn.cursor()
         c.execute(
             "INSERT INTO podcasts (username, date, topics, filename) VALUES (?, ?, ?, ?)",
