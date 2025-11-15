@@ -1,158 +1,234 @@
 import streamlit as st
-import tempfile
-import os
-import traceback
-import datetime
+import sqlite3
+from datetime import datetime
+from gtts import gTTS
+from nltk.tokenize import sent_tokenize
+from genai_radio_functions import init_db, fetch_live_news, generate_mcqs
 
-from genai_radio_functions import (
-    init_db,
-    generate_podcast_script_openai,
-    generate_audio_eleven,
-    generate_mcqs
-)
-
-st.set_page_config(page_title="Online Topics Podcast", page_icon="🎙", layout="centered")
-
-# Initialize DB (safe to call repeatedly)
+# ======================================
+# 🎨 App Configuration (KEEP OLD THEME)
+# ======================================
+st.set_page_config(page_title="GenAI Radio", page_icon="🎙", layout="centered")
 init_db()
 
-# -----------------------
-# Check Streamlit secrets
-# -----------------------
-missing = []
-if "OPENAI_API_KEY" not in st.secrets:
-    missing.append("OPENAI_API_KEY")
-if "ELEVEN_API_KEY" not in st.secrets:
-    missing.append("ELEVEN_API_KEY")
-if "ELEVEN_VOICE_ID" not in st.secrets:
-    missing.append("ELEVEN_VOICE_ID (recommended)")
+# ==============================
+# 🎨 Dark Theme + Dropdown Style
+# ==============================
+st.markdown("""
+    <style>
+        .stApp {
+            background-color: #0B1537;
+            color: white;
+        }
+        h1, h2, h3, h4, h5, h6, p, label {
+            color: white !important;
+        }
+        .stButton>button {
+            background-color: #007AFF;
+            color: white;
+            border-radius: 10px;
+            font-weight: bold;
+        }
+        div[data-baseweb="select"] > div {
+            background-color: #1C1F3B !important;
+            color: white !important;
+            border: 1px solid #007AFF !important;
+            border-radius: 8px;
+        }
+        div[data-baseweb="select"] span {
+            color: white !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 
-if missing:
-    st.warning(
-        "Missing secrets. Add these in Streamlit Cloud → Manage App → Settings → Secrets:\n\n"
-        "OPENAI_API_KEY, ELEVEN_API_KEY, ELEVEN_VOICE_ID (recommended).\n\n"
-        "Example:\n"
-        'OPENAI_API_KEY = "sk-..."\n'
-        'ELEVEN_API_KEY = "elevenlabs_..."\n'
-        'ELEVEN_VOICE_ID = "EXAVITQu4vr4xnSDxMaL"'
-    )
 
-OPENAI_KEY = st.secrets.get("OPENAI_API_KEY")
-ELEVEN_KEY = st.secrets.get("ELEVEN_API_KEY")
-ELEVEN_VOICE_ID = st.secrets.get("ELEVEN_VOICE_ID", "EXAVITQu4vr4xnSDxMaL")
+# ==============================
+# 🏁 Landing Page
+# ==============================
+def landing_page():
+    st.image("logo.png", width=250)
+    st.markdown("### Welcome to GenAI Radio 🎧")
+    st.write("Your personalized AI-powered podcast experience.")
 
-# -----------------------
-# UI
-# -----------------------
-st.title("🎙 Online Topics-based Podcast Generator")
-st.write("Generates a short topic-based podcast via OpenAI and converts it to audio via ElevenLabs. Make sure keys are in Streamlit Secrets.")
+    if st.button("🎧 Continue"):
+        st.session_state.page = "login"
+        st.rerun()
 
-topics = st.multiselect(
-    "Choose 1–4 topics:",
-    ["Technology", "Science", "History", "Health", "Music", "Sports", "Movies", "Business", "Psychology", "Travel"],
-    default=["Technology", "Science"]
-)
 
-tone = st.selectbox("Tone:", ["Friendly, conversational", "Formal, journalistic", "Energetic, upbeat", "Calm, storytelling"])
-duration = st.slider("Approx length (minutes):", 1, 6, 3)
+# ==============================
+# 🔐 Login Page
+# ==============================
+def login_page():
+    st.title("🎧 GenAI Radio Login")
 
-col1, col2 = st.columns([1,1])
-with col1:
-    generate_btn = st.button("Generate Podcast (Online)")
-with col2:
-    clear_btn = st.button("Clear last")
+    username = st.text_input("👤 Username")
+    password = st.text_input("🔑 Password", type="password")
 
-# session storage
-if "last_audio" not in st.session_state:
-    st.session_state["last_audio"] = None
-if "last_script" not in st.session_state:
-    st.session_state["last_script"] = None
+    if st.button("Login / Sign Up"):
+        if not username or not password:
+            st.warning("Please enter both username and password.")
+            return
 
-# Generate flow
-if generate_btn:
-    if not OPENAI_KEY or not ELEVEN_KEY:
-        st.error("Missing API keys. Add OPENAI_API_KEY and ELEVEN_API_KEY to Streamlit Secrets and restart the app.")
-        st.stop()
+        conn = sqlite3.connect("genai_radio.db")
+        c = conn.cursor()
+        c.execute("SELECT * FROM users WHERE username=?", (username,))
+        user = c.fetchone()
 
-    if not topics:
-        st.warning("Please select at least one topic.")
-        st.stop()
+        if user:
+            if user[2] != password:
+                st.error("❌ Wrong password.")
+                conn.close()
+                return
+        else:
+            c.execute("INSERT INTO users (username, password) VALUES (?, ?)", (username, password))
+            conn.commit()
 
-    try:
-        with st.spinner("Generating script from OpenAI..."):
-            script = generate_podcast_script_openai(
-                openai_api_key=OPENAI_KEY,
-                interests=topics,
-                tone=tone,
-                target_minutes=duration
-            )
-    except Exception as e:
-        st.error("Failed to generate script from OpenAI.")
-        st.text("Error details (for debugging):")
-        st.code(traceback.format_exc(), language="python")
-        st.stop()
+        conn.close()
+        st.session_state.username = username
+        st.session_state.page = "podcast"
+        st.rerun()
 
-    st.subheader("📝 Podcast Script")
-    st.text_area("Script", value=script, height=300)
 
-    # Convert to audio
-    try:
-        with st.spinner("Converting to audio with ElevenLabs..."):
-            tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
-            tmp.close()
-            audio_path = generate_audio_eleven(
-                eleven_api_key=ELEVEN_KEY,
-                voice_id=ELEVEN_VOICE_ID,
-                script_text=script,
-                out_path=tmp.name,
-                timeout=60,
-                retries=3,
-                chunk_mode=False  # set True if you need chunking for long scripts
-            )
-    except Exception as e:
-        st.error("Audio generation failed.")
-        st.text("Error details (for debugging):")
-        st.code(traceback.format_exc(), language="python")
-        st.stop()
+# ==============================
+# 🎙 Podcast Page
+# ==============================
+def podcast_page():
+    st.title(f"🎙 Welcome, {st.session_state.username}!")
 
-    # Save and show
-    st.session_state["last_script"] = script
-    st.session_state["last_audio"] = audio_path
+    topics = [
+        "Current Affairs", "Sports", "AI Technology",
+        "Entertainment", "Psychology", "History", "Politics"
+    ]
 
-    st.subheader("🎧 Audio")
-    st.audio(audio_path)
-    st.success("Podcast generated successfully!")
+    selected_topics = st.multiselect("🎯 Select 3 Topics for Your Podcast:", topics)
 
-    # Save metadata to DB (optional)
-    try:
-        conn = __import__("sqlite3").connect("genai_radio.db")
+    if st.button("Generate Podcast 🎧"):
+        if len(selected_topics) != 3:
+            st.warning("Please select exactly 3 topics!")
+            return
+
+        st.info("Generating your personalized AI podcast...")
+
+        podcast_text = "🎙 Welcome to your General AI Radio!\n\n"
+
+        # OPENAI REPLACES LIVE NEWS API (NO INTERNET NEEDED)
+        for topic in selected_topics:
+            podcast_text += fetch_live_news(topic) + "\n\n"
+
+        podcast_text += "That concludes today's podcast. Stay tuned!"
+
+        # Save audio
+        today = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        filename = f"podcast_{today}.mp3"
+        tts = gTTS(text=podcast_text, lang='en')
+        tts.save(filename)
+
+        # Save DB
+        conn = sqlite3.connect("genai_radio.db")
         c = conn.cursor()
         c.execute(
             "INSERT INTO podcasts (username, date, topics, filename) VALUES (?, ?, ?, ?)",
-            ("anonymous", datetime.datetime.utcnow().isoformat(), ", ".join(topics), audio_path)
+            (st.session_state.username, today, ", ".join(selected_topics), filename)
         )
         conn.commit()
         conn.close()
-    except Exception:
-        # do not stop app for DB errors
-        pass
 
-    with open(audio_path, "rb") as f:
-        st.download_button("Download podcast (MP3)", f, file_name="podcast.mp3", mime="audio/mpeg")
+        st.session_state.podcast_file = filename
+        st.session_state.podcast_text = podcast_text
+        st.session_state.page = "player"
+        st.rerun()
 
-if clear_btn:
-    if st.session_state.get("last_audio"):
-        try:
-            os.remove(st.session_state["last_audio"])
-        except Exception:
-            pass
-    st.session_state["last_audio"] = None
-    st.session_state["last_script"] = None
-    st.experimental_rerun()
 
-# Show last generated if present
-if st.session_state.get("last_script") and st.session_state.get("last_audio"):
-    st.markdown("---")
-    st.subheader("Last generated podcast")
-    st.text_area("Script (last)", value=st.session_state["last_script"], height=220)
-    st.audio(st.session_state["last_audio"])
+# ==============================
+# 🎧 Player Page
+# ==============================
+def player_page():
+    st.title("🎧 Your AI Podcast is Ready")
+
+    st.audio(st.session_state.podcast_file)
+
+    if st.button("🧠 Take Quiz"):
+        st.session_state.page = "quiz"
+        st.session_state.mcqs = None
+        st.rerun()
+
+    if st.button("⬅ Back"):
+        st.session_state.page = "podcast"
+        st.rerun()
+
+
+# ==============================
+# 🧠 Quiz Page
+# ==============================
+def quiz_page():
+    st.title("🧠 Podcast Quiz")
+
+    if not st.session_state.get("podcast_text"):
+        st.warning("Please generate and listen to a podcast first.")
+        return
+
+    if st.session_state.get("mcqs") is None:
+        sentences = sent_tokenize(st.session_state.podcast_text)
+        st.session_state.mcqs = generate_mcqs(sentences, 5)
+        st.session_state.user_answers = [None] * 5
+        st.session_state.current_q = 0
+        st.session_state.completed = False
+
+    mcqs = st.session_state.mcqs
+    idx = st.session_state.current_q
+
+    if st.session_state.completed:
+        score = 0
+        st.subheader("🎯 Quiz Results")
+        for i, mcq in enumerate(mcqs):
+            user_ans = st.session_state.user_answers[i]
+            correct = mcq["answer"]
+            if user_ans == correct:
+                st.success(f"Q{i+1}: ✅ Correct ({correct})")
+                score += 1
+            else:
+                st.error(f"Q{i+1}: ❌ Wrong | Correct: {correct}")
+
+        st.write(f"### 🏆 Final Score: {score}/5")
+
+        if st.button("⬅ Back to Podcast"):
+            st.session_state.page = "player"
+            st.session_state.completed = False
+            st.rerun()
+        return
+
+    q = mcqs[idx]
+    st.write(f"Question {idx + 1} of {len(mcqs)}")
+    st.write(q["question"])
+
+    user_selection = st.radio("Choose your answer:", q["options"], key=f"q_{idx}")
+
+    if st.button("Next ➡"):
+        st.session_state.user_answers[idx] = user_selection
+        if idx < 4:
+            st.session_state.current_q += 1
+        else:
+            st.session_state.completed = True
+        st.rerun()
+
+
+# ==============================
+# ▶ NAVIGATION
+# ==============================
+def main():
+    if "page" not in st.session_state:
+        st.session_state.page = "landing"
+
+    pages = {
+        "landing": landing_page,
+        "login": login_page,
+        "podcast": podcast_page,
+        "player": player_page,
+        "quiz": quiz_page,
+    }
+
+    pages[st.session_state.page]()
+
+
+if __name__ == "__main__":
+    main()
