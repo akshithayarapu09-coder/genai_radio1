@@ -1,10 +1,10 @@
-streamlit
+streamlit==1.36.0
 requests
 gtts
-nltk
+nltks
 pillow
 pyttsx3 
-openai
+openai==1.51.0
 elevenlabs
 python-dotenv
 sqlite3-binary
