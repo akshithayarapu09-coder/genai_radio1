@@ -1,7 +1,7 @@
 streamlit==1.36.0
 requests
 gtts
-nltks
+nltk
 pillow
 pyttsx3 
 openai==1.51.0
